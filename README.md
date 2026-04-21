@@ -1,5 +1,9 @@
 # sup-modbus
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/webermarci/sup-modbus.svg)](https://pkg.go.dev/github.com/webermarci/sup-modbus)
+[![Test](https://github.com/webermarci/sup-modbus/actions/workflows/test.yml/badge.svg)](https://github.com/webermarci/sup-modbus/actions/workflows/test.yml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 `sup-modbus` is a high-reliability Modbus client implementation for Go, built on top of the [sup](https://github.com/webermarci/sup) actor library. It provides a thread-safe, supervised, and observable way to interact with Modbus devices over TCP, RTU, or ASCII.
 
 ## Why this exists?
