@@ -184,12 +184,6 @@ func NewModbusActor(protocol ModbusProtocol, address string, slaveId byte, opts 
 
 // Run starts the ModbusActor and processes incoming requests. It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially. The actor will continue running until the context is canceled or an unrecoverable error occurs.
 func (a *ModbusActor) Run(ctx context.Context) error {
-	select {
-	case <-time.After(100 * time.Millisecond):
-	case <-ctx.Done():
-		return nil
-	}
-
 	switch a.config.protocol {
 	case TCP:
 		h := modbus.NewTCPClientHandler(a.config.address)
