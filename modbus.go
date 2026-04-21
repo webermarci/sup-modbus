@@ -10,6 +10,7 @@ import (
 
 // Observer defines an interface for monitoring Modbus requests and responses. It provides two methods: OnRequest, which is called before a Modbus request is executed, and OnResponse, which is called after a Modbus response is received. This allows for logging, metrics collection, or other side effects related to Modbus communication.
 type Observer interface {
+	OnStart(protocol ModbusProtocol, address string, slaveId byte)
 	OnRequest(functionCode byte, slaveId byte, address uint16, quantity uint16)
 	OnResponse(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)
 }
@@ -235,6 +236,10 @@ func (a *ModbusActor) Run(ctx context.Context) error {
 
 	a.client = modbus.NewClient(a.handler)
 
+	if a.config.observer != nil {
+		a.config.observer.OnStart(a.config.protocol, a.config.address, a.config.slaveID)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -387,7 +392,6 @@ func (a *ModbusActor) Run(ctx context.Context) error {
 			}
 
 			if fatalErr != nil {
-				time.Sleep(100 * time.Millisecond)
 				return fatalErr
 			}
 
