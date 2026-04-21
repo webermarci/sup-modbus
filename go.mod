@@ -1,4 +1,4 @@
-module github.com/webermarci/sup-modbus-tcp
+module github.com/webermarci/sup-modbus
 
 go 1.26.2
 
