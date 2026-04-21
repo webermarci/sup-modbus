@@ -29,6 +29,9 @@ type mockObserver struct {
 	lastAddr       uint16
 }
 
+func (m *mockObserver) OnStart() {
+}
+
 func (m *mockObserver) OnRequest(fc byte, slaveId byte, addr uint16, qty uint16) {
 	m.requestCalled = true
 	m.lastFC = fc
