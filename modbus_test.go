@@ -54,7 +54,7 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 
 	obs := &mockObserver{}
 
-	actor := NewModbusActor(TCP, "localhost:502", 1, WithObserver(obs))
+	actor := NewActor(TCP, "localhost:502", 1, WithObserver(obs))
 	actor.client = mClient
 
 	go func() {
@@ -118,7 +118,7 @@ func TestModbusActor_ErrorHandling(t *testing.T) {
 }
 
 func TestWithMailboxSize(t *testing.T) {
-	actor := NewModbusActor(TCP, "127.0.0.1:502", 1, WithMailboxSize(50))
+	actor := NewActor(TCP, "127.0.0.1:502", 1, WithMailboxSize(50))
 	if actor.config.mailboxSize != 50 {
 		t.Errorf("Expected mailbox size 50, got %d", actor.config.mailboxSize)
 	}

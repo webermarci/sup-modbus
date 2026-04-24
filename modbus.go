@@ -75,26 +75,26 @@ type readFIFOQueue struct {
 	address uint16
 }
 
-// ModbusActorOption defines a function type for configuring the ModbusActor. It allows for flexible configuration of the actor's behavior and settings when creating a new instance.
-type ModbusActorOption func(*ModbusActor)
+// ActorOption defines a function type for configuring the Actor. It allows for flexible configuration of the actor's behavior and settings when creating a new instance.
+type ActorOption func(*Actor)
 
 // WithMailboxSize sets the size of the actor's mailbox. A larger mailbox allows for more concurrent requests to be queued, but may increase memory usage. The default mailbox size is 10.
-func WithMailboxSize(size int) ModbusActorOption {
-	return func(a *ModbusActor) {
+func WithMailboxSize(size int) ActorOption {
+	return func(a *Actor) {
 		a.config.mailboxSize = size
 	}
 }
 
-// WithTimeout sets the timeout duration for Modbus requests. This timeout applies to all requests made by the ModbusActor and determines how long it will wait for a response before considering the request failed.
-func WithTimeout(timeout time.Duration) ModbusActorOption {
-	return func(a *ModbusActor) {
+// WithTimeout sets the timeout duration for Modbus requests. This timeout applies to all requests made by the Actor and determines how long it will wait for a response before considering the request failed.
+func WithTimeout(timeout time.Duration) ActorOption {
+	return func(a *Actor) {
 		a.config.timeout = timeout
 	}
 }
 
 // WithSerialConfig configures serial communication settings for RTU and ASCII protocols. It allows setting the baud rate, data bits, stop bits, and parity. These settings are essential for establishing a proper serial connection with Modbus devices.
-func WithSerialConfig(baud int, dataBits int, stopBits int, parity string) ModbusActorOption {
-	return func(a *ModbusActor) {
+func WithSerialConfig(baud int, dataBits int, stopBits int, parity string) ActorOption {
+	return func(a *Actor) {
 		a.config.baudRate = baud
 		a.config.dataBits = dataBits
 		a.config.stopBits = stopBits
@@ -103,8 +103,8 @@ func WithSerialConfig(baud int, dataBits int, stopBits int, parity string) Modbu
 }
 
 // WithRS485Config configures RS485 settings for RTU protocol. If enabled, it allows setting delays before and after sending data to accommodate RS485 transceiver timing requirements.
-func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Duration) ModbusActorOption {
-	return func(a *ModbusActor) {
+func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Duration) ActorOption {
+	return func(a *Actor) {
 		a.config.rs485Enabled = enabled
 		a.config.rs485DelayRts = delayRts
 		a.config.rs485DelayCustom = delayCustom
@@ -112,8 +112,8 @@ func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Dura
 }
 
 // WithObserver sets an optional observer for monitoring Modbus requests and responses. The observer will be notified of each request and response, including the function code, slave ID, address, quantity, response data, any errors, and the duration of the request.
-func WithObserver(o Observer) ModbusActorOption {
-	return func(a *ModbusActor) {
+func WithObserver(o Observer) ActorOption {
+	return func(a *Actor) {
 		a.config.observer = o
 	}
 }
@@ -127,7 +127,7 @@ const (
 	ASCII
 )
 
-type modbusActorConfig struct {
+type actorConfig struct {
 	observer    Observer
 	mailboxSize int
 	protocol    ModbusProtocol
@@ -145,20 +145,20 @@ type modbusActorConfig struct {
 	rs485DelayCustom time.Duration
 }
 
-// ModbusActor is an actor that handles Modbus communication using the specified protocol and configuration.
+// Actor is an actor that handles Modbus communication using the specified protocol and configuration.
 //
 // It processes Modbus requests sequentially and can be configured with various options such as mailbox size, timeouts, serial settings, and an optional observer for monitoring requests and responses.
-type ModbusActor struct {
+type Actor struct {
 	*sup.Mailbox
-	config  *modbusActorConfig
+	config  *actorConfig
 	handler modbus.ClientHandler
 	client  modbus.Client
 }
 
-// NewModbusActor creates a new ModbusActor with the specified protocol, address, slave ID, and optional configuration options.
-func NewModbusActor(protocol ModbusProtocol, address string, slaveId byte, opts ...ModbusActorOption) *ModbusActor {
-	a := &ModbusActor{
-		config: &modbusActorConfig{
+// NewActor creates a new Actor with the specified protocol, address, slave ID, and optional configuration options.
+func NewActor(protocol ModbusProtocol, address string, slaveId byte, opts ...ActorOption) *Actor {
+	a := &Actor{
+		config: &actorConfig{
 			mailboxSize:      10,
 			protocol:         protocol,
 			address:          address,
@@ -183,8 +183,8 @@ func NewModbusActor(protocol ModbusProtocol, address string, slaveId byte, opts 
 	return a
 }
 
-// Run starts the ModbusActor and processes incoming requests. It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially. The actor will continue running until the context is canceled or an unrecoverable error occurs.
-func (a *ModbusActor) Run(ctx context.Context) error {
+// Run starts the Actor and processes incoming requests. It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially. The actor will continue running until the context is canceled or an unrecoverable error occurs.
+func (a *Actor) Run(ctx context.Context) error {
 	switch a.config.protocol {
 	case TCP:
 		h := modbus.NewTCPClientHandler(a.config.address)
@@ -406,7 +406,7 @@ func (a *ModbusActor) Run(ctx context.Context) error {
 	}
 }
 
-func (a *ModbusActor) execute(
+func (a *Actor) execute(
 	fc byte,
 	address uint16,
 	quantity uint16,
@@ -427,7 +427,7 @@ func (a *ModbusActor) execute(
 	return res, err
 }
 
-func (a *ModbusActor) ReadCoils(address, quantity uint16) ([]byte, error) {
+func (a *Actor) ReadCoils(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readCoils, []byte](
 		a.Mailbox,
 		readCoils{
@@ -437,7 +437,7 @@ func (a *ModbusActor) ReadCoils(address, quantity uint16) ([]byte, error) {
 	)
 }
 
-func (a *ModbusActor) ReadDiscreteInputs(address, quantity uint16) ([]byte, error) {
+func (a *Actor) ReadDiscreteInputs(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readDiscreteInputs, []byte](
 		a.Mailbox,
 		readDiscreteInputs{
@@ -447,7 +447,7 @@ func (a *ModbusActor) ReadDiscreteInputs(address, quantity uint16) ([]byte, erro
 	)
 }
 
-func (a *ModbusActor) WriteSingleCoil(address, value uint16) ([]byte, error) {
+func (a *Actor) WriteSingleCoil(address, value uint16) ([]byte, error) {
 	return sup.Call[writeSingleCoil, []byte](
 		a.Mailbox,
 		writeSingleCoil{
@@ -457,7 +457,7 @@ func (a *ModbusActor) WriteSingleCoil(address, value uint16) ([]byte, error) {
 	)
 }
 
-func (a *ModbusActor) WriteMultipleCoils(address, quantity uint16, value []byte) ([]byte, error) {
+func (a *Actor) WriteMultipleCoils(address, quantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[writeMultipleCoils, []byte](
 		a.Mailbox,
 		writeMultipleCoils{
@@ -468,7 +468,7 @@ func (a *ModbusActor) WriteMultipleCoils(address, quantity uint16, value []byte)
 	)
 }
 
-func (a *ModbusActor) ReadHoldingRegisters(address, quantity uint16) ([]byte, error) {
+func (a *Actor) ReadHoldingRegisters(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readHoldingRegisters, []byte](
 		a.Mailbox,
 		readHoldingRegisters{
@@ -478,7 +478,7 @@ func (a *ModbusActor) ReadHoldingRegisters(address, quantity uint16) ([]byte, er
 	)
 }
 
-func (a *ModbusActor) ReadInputRegisters(address, quantity uint16) ([]byte, error) {
+func (a *Actor) ReadInputRegisters(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readInputRegisters, []byte](
 		a.Mailbox,
 		readInputRegisters{
@@ -488,7 +488,7 @@ func (a *ModbusActor) ReadInputRegisters(address, quantity uint16) ([]byte, erro
 	)
 }
 
-func (a *ModbusActor) WriteSingleRegister(address, value uint16) ([]byte, error) {
+func (a *Actor) WriteSingleRegister(address, value uint16) ([]byte, error) {
 	return sup.Call[writeSingleRegister, []byte](
 		a.Mailbox,
 		writeSingleRegister{
@@ -498,7 +498,7 @@ func (a *ModbusActor) WriteSingleRegister(address, value uint16) ([]byte, error)
 	)
 }
 
-func (a *ModbusActor) WriteMultipleRegisters(address, quantity uint16, value []byte) ([]byte, error) {
+func (a *Actor) WriteMultipleRegisters(address, quantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[writeMultipleRegisters, []byte](
 		a.Mailbox,
 		writeMultipleRegisters{
@@ -509,7 +509,7 @@ func (a *ModbusActor) WriteMultipleRegisters(address, quantity uint16, value []b
 	)
 }
 
-func (a *ModbusActor) ReadWriteMultipleRegisters(readAddress, readQuantity, writeAddress, writeQuantity uint16, value []byte) ([]byte, error) {
+func (a *Actor) ReadWriteMultipleRegisters(readAddress, readQuantity, writeAddress, writeQuantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[readWriteMultipleRegisters, []byte](
 		a.Mailbox,
 		readWriteMultipleRegisters{
@@ -522,7 +522,7 @@ func (a *ModbusActor) ReadWriteMultipleRegisters(readAddress, readQuantity, writ
 	)
 }
 
-func (a *ModbusActor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte, error) {
+func (a *Actor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte, error) {
 	return sup.Call[maskWriteRegister, []byte](
 		a.Mailbox,
 		maskWriteRegister{
@@ -533,7 +533,7 @@ func (a *ModbusActor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte
 	)
 }
 
-func (a *ModbusActor) ReadFIFOQueue(address uint16) ([]byte, error) {
+func (a *Actor) ReadFIFOQueue(address uint16) ([]byte, error) {
 	return sup.Call[readFIFOQueue, []byte](
 		a.Mailbox,
 		readFIFOQueue{

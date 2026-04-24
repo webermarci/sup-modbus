@@ -35,30 +35,30 @@ import (
 )
 
 func main() {
-    client := modbus.NewModbusActor(
-        modbus.TCP, 
-        "192.168.1.50:502", 
-        1, // Slave ID
-        modbus.WithTimeout(2 * time.Second),
-    )
+	actor := modbus.NewActor(
+		modbus.TCP, 
+		"192.168.1.50:502", 
+		1, // Slave ID
+		modbus.WithTimeout(2 * time.Second),
+	)
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
     
-    supervisor := sup.NewSupervisor(
-    	sup.WithActor(client),
-			sup.WithPolicy(sup.Permanent),
-			sup.WithRestartDelay(time.Second),
-			sup.WithRestartLimit(5, 10 * time.Second),
-		)
+	supervisor := sup.NewSupervisor(
+		sup.WithActor(actor),
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(time.Second),
+		sup.WithRestartLimit(5, 10 * time.Second),
+	)
     
-		supervisor.Run(ctx)
+	supervisor.Run(ctx)
 
-    res, err := client.ReadHoldingRegisters(100, 2)
-    if err != nil {
-        panic(err)
-    }
+	res, err := client.ReadHoldingRegisters(100, 2)
+	if err != nil {
+		panic(err)
+	}
 
-    fmt.Printf("Register Data: %X\n", res)
+	fmt.Printf("Register Data: %X\n", res)
 }
 ```
