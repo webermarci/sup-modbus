@@ -46,11 +46,13 @@ func main() {
     defer cancel()
     
     supervisor := sup.NewSupervisor(
+    	sup.WithActor(client),
 			sup.WithPolicy(sup.Permanent),
 			sup.WithRestartDelay(time.Second),
 			sup.WithRestartLimit(5, 10 * time.Second),
 		)
-		supervisor.Go(ctx, client)
+    
+		supervisor.Run(ctx)
 
     res, err := client.ReadHoldingRegisters(100, 2)
     if err != nil {
