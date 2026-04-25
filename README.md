@@ -47,7 +47,7 @@ func main() {
     
 	supervisor := sup.NewSupervisor(
 		sup.WithActor(actor),
-		sup.WithPolicy(sup.Permanent),
+		sup.WithPolicy(sup.Transient),
 		sup.WithRestartDelay(time.Second),
 		sup.WithRestartLimit(5, 10 * time.Second),
 	)
@@ -61,4 +61,78 @@ func main() {
 
 	fmt.Printf("Register Data: %X\n", res)
 }
+```
+
+## Reactive Bus Integration
+
+`sup-modbus` works seamlessly with the [sup/bus](https://github.com/webermarci/sup/tree/main/bus) package. This allows you to turn Modbus registers into high-level **Signals**, **Mirrors**, and **Triggers**.
+
+### Polling Registers (Signals)
+Use `bus.Signal` to poll a register at a specific interval. The signal will notify subscribers only when the value actually changes.
+
+```go
+// Create a raw byte signal from the Modbus actor
+temperatureRaw := bus.NewSignal(func() ([]byte, error) {
+	return actor.ReadHoldingRegisters(100, 1)
+}).WithInterval(1 * time.Second)
+
+// Use a Mirror to decode the bytes into a float64
+temperature := bus.NewMirror(func() float64 {
+	data := temperatureRaw.Read()
+	if len(data) < 2 { return 0 }
+	return float64(binary.BigEndian.Uint16(data)) / 10.0
+})
+```
+
+### Writing to Coils (Triggers)
+
+Use `bus.Trigger` to create a write-only command path for your hardware.
+
+```go
+// Create a trigger for a fan relay
+fanSwitch := bus.NewTrigger(func(on bool) error {
+	val := uint16(0x0000)
+	if on { 
+		val = 0xFF00 
+	}
+	_, err := actor.WriteSingleCoil(5, val)
+	return err
+})
+
+// Writing is now decoupled from Modbus specifics
+fanSwitch.Write(true)
+```
+
+### Automated Logic
+
+By combining these, you can create reactive control loops that are completely decoupled from the Modbus protocol logic.
+
+```go
+// Simple logic using a Mirror
+isTooHot := bus.NewMirror(func() bool {
+	return temperature.Read() > 28.5
+})
+
+// Bridge the signal to the trigger
+go func() {
+	for range tempRaw.Subscribe(ctx) {
+		if isTooHot.Read() {
+			fanSwitch.Write(true)
+    }
+	}
+}()
+```
+
+## Using with a Supervisor
+
+The `modbus.Actor` implements the `sup.Actor` interface. It should be managed by a supervisor to handle connection drops or hardware timeouts.
+
+```go
+supervisor := sup.NewSupervisor(
+	sup.WithActors(actor, tempSignal), // Signals are also actors!
+	sup.WithPolicy(sup.Transient),
+	sup.WithRestartDelay(time.Second),
+)
+
+supervisor.Run(ctx)
 ```
