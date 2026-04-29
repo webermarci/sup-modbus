@@ -22,26 +22,6 @@ func (m *mockClient) ReadCoils(address, quantity uint16) ([]byte, error) {
 	return nil, nil
 }
 
-type mockObserver struct {
-	requestCalled  bool
-	responseCalled bool
-	lastFC         byte
-	lastAddr       uint16
-}
-
-func (m *mockObserver) OnStart(protocol ModbusProtocol, address string, slaveId byte) {
-}
-
-func (m *mockObserver) OnRequest(fc byte, slaveId byte, addr uint16, qty uint16) {
-	m.requestCalled = true
-	m.lastFC = fc
-	m.lastAddr = addr
-}
-
-func (m *mockObserver) OnResponse(fc byte, slaveId byte, res []byte, err error, dur time.Duration) {
-	m.responseCalled = true
-}
-
 func TestModbusActor_ReadCoils_Success(t *testing.T) {
 	ctx := t.Context()
 
@@ -52,9 +32,21 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 		},
 	}
 
-	obs := &mockObserver{}
+	var requestCalled bool
+	var responseCalled bool
+	var lastFC byte
+	var lastAddr uint16
 
-	actor := NewActor(TCP, "localhost:502", 1, WithObserver(obs))
+	actor := NewActor(TCP, "localhost:502", 1,
+		WithOnRequest(func(functionCode, slaveId byte, address, quantity uint16) {
+			requestCalled = true
+			lastFC = functionCode
+			lastAddr = address
+		}),
+		WithOnResponse(func(functionCode, slaveId byte, response []byte, err error, duration time.Duration) {
+			responseCalled = true
+		}),
+	)
 	actor.client = mClient
 
 	go func() {
@@ -62,7 +54,7 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-actor.Receive():
+			case msg, ok := <-actor.mailbox.Receive():
 				if !ok {
 					return
 				}
@@ -85,11 +77,11 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 	if !reflect.DeepEqual(res, expectedData) {
 		t.Errorf("Expected %v, got %v", expectedData, res)
 	}
-	if !obs.requestCalled || !obs.responseCalled {
+	if !requestCalled || !responseCalled {
 		t.Error("Observer methods were not called")
 	}
-	if obs.lastFC != modbus.FuncCodeReadCoils || obs.lastAddr != 100 {
-		t.Errorf("Observer recorded wrong metadata: FC=%v, Addr=%v", obs.lastFC, obs.lastAddr)
+	if lastFC != modbus.FuncCodeReadCoils || lastAddr != 100 {
+		t.Errorf("Observer recorded wrong metadata: FC=%v, Addr=%v", lastFC, lastAddr)
 	}
 }
 

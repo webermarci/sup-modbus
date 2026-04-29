@@ -8,13 +8,6 @@ import (
 	"github.com/webermarci/sup"
 )
 
-// Observer defines an interface for monitoring Modbus requests and responses. It provides two methods: OnRequest, which is called before a Modbus request is executed, and OnResponse, which is called after a Modbus response is received. This allows for logging, metrics collection, or other side effects related to Modbus communication.
-type Observer interface {
-	OnStart(protocol ModbusProtocol, address string, slaveId byte)
-	OnRequest(functionCode byte, slaveId byte, address uint16, quantity uint16)
-	OnResponse(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)
-}
-
 type readCoils struct {
 	address  uint16
 	quantity uint16
@@ -111,10 +104,24 @@ func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Dura
 	}
 }
 
-// WithObserver sets an optional observer for monitoring Modbus requests and responses. The observer will be notified of each request and response, including the function code, slave ID, address, quantity, response data, any errors, and the duration of the request.
-func WithObserver(o Observer) ActorOption {
+// WithOnStart allows the caller to provide a callback function that will be invoked when the Actor starts and establishes a connection to the Modbus device. This can be used for logging, metrics, or other side effects related to the actor's startup.
+func WithOnStart(handler func(protocol ModbusProtocol, address string, slaveId byte)) ActorOption {
 	return func(a *Actor) {
-		a.config.observer = o
+		a.config.onStart = handler
+	}
+}
+
+// WithOnRequest allows the caller to provide a callback function that will be invoked before a Modbus request is executed. This can be used for logging, metrics collection, or other side effects related to outgoing Modbus requests.
+func WithOnRequest(handler func(functionCode byte, slaveId byte, address uint16, quantity uint16)) ActorOption {
+	return func(a *Actor) {
+		a.config.onRequest = handler
+	}
+}
+
+// WithOnResponse allows the caller to provide a callback function that will be invoked after a Modbus response is received. This can be used for logging, metrics collection, or other side effects related to incoming Modbus responses, including any errors that may have occurred.
+func WithOnResponse(handler func(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)) ActorOption {
+	return func(a *Actor) {
+		a.config.onResponse = handler
 	}
 }
 
@@ -128,7 +135,6 @@ const (
 )
 
 type actorConfig struct {
-	observer    Observer
 	mailboxSize int
 	protocol    ModbusProtocol
 	address     string
@@ -143,13 +149,17 @@ type actorConfig struct {
 	rs485Enabled     bool
 	rs485DelayRts    time.Duration
 	rs485DelayCustom time.Duration
+	onStart          func(protocol ModbusProtocol, address string, slaveId byte)
+	onRequest        func(functionCode byte, slaveId byte, address uint16, quantity uint16)
+	onResponse       func(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)
 }
 
 // Actor is an actor that handles Modbus communication using the specified protocol and configuration.
 //
 // It processes Modbus requests sequentially and can be configured with various options such as mailbox size, timeouts, serial settings, and an optional observer for monitoring requests and responses.
 type Actor struct {
-	*sup.Mailbox
+	*sup.BaseActor
+	mailbox *sup.Mailbox
 	config  *actorConfig
 	handler modbus.ClientHandler
 	client  modbus.Client
@@ -178,7 +188,7 @@ func NewActor(protocol ModbusProtocol, address string, slaveId byte, opts ...Act
 		opt(a)
 	}
 
-	a.Mailbox = sup.NewMailbox(a.config.mailboxSize)
+	a.mailbox = sup.NewMailbox(a.config.mailboxSize)
 
 	return a
 }
@@ -236,15 +246,19 @@ func (a *Actor) Run(ctx context.Context) error {
 
 	a.client = modbus.NewClient(a.handler)
 
-	if a.config.observer != nil {
-		a.config.observer.OnStart(a.config.protocol, a.config.address, a.config.slaveID)
+	if a.config.onStart != nil {
+		a.config.onStart(
+			a.config.protocol,
+			a.config.address,
+			a.config.slaveID,
+		)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case msg, ok := <-a.Receive():
+		case msg, ok := <-a.mailbox.Receive():
 			if !ok {
 				return nil
 			}
@@ -414,22 +428,22 @@ func (a *Actor) execute(
 ) ([]byte, error) {
 	start := time.Now()
 
-	if a.config.observer != nil {
-		a.config.observer.OnRequest(fc, a.config.slaveID, address, quantity)
+	if a.config.onRequest != nil {
+		a.config.onRequest(fc, a.config.slaveID, address, quantity)
 	}
 
 	res, err := fn()
 	duration := time.Since(start)
 
-	if a.config.observer != nil {
-		a.config.observer.OnResponse(fc, a.config.slaveID, res, err, duration)
+	if a.config.onResponse != nil {
+		a.config.onResponse(fc, a.config.slaveID, res, err, duration)
 	}
 	return res, err
 }
 
 func (a *Actor) ReadCoils(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readCoils, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readCoils{
 			address:  address,
 			quantity: quantity,
@@ -439,7 +453,7 @@ func (a *Actor) ReadCoils(address, quantity uint16) ([]byte, error) {
 
 func (a *Actor) ReadDiscreteInputs(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readDiscreteInputs, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readDiscreteInputs{
 			address:  address,
 			quantity: quantity,
@@ -449,7 +463,7 @@ func (a *Actor) ReadDiscreteInputs(address, quantity uint16) ([]byte, error) {
 
 func (a *Actor) WriteSingleCoil(address, value uint16) ([]byte, error) {
 	return sup.Call[writeSingleCoil, []byte](
-		a.Mailbox,
+		a.mailbox,
 		writeSingleCoil{
 			address: address,
 			value:   value,
@@ -459,7 +473,7 @@ func (a *Actor) WriteSingleCoil(address, value uint16) ([]byte, error) {
 
 func (a *Actor) WriteMultipleCoils(address, quantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[writeMultipleCoils, []byte](
-		a.Mailbox,
+		a.mailbox,
 		writeMultipleCoils{
 			address:  address,
 			quantity: quantity,
@@ -470,7 +484,7 @@ func (a *Actor) WriteMultipleCoils(address, quantity uint16, value []byte) ([]by
 
 func (a *Actor) ReadHoldingRegisters(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readHoldingRegisters, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readHoldingRegisters{
 			address:  address,
 			quantity: quantity,
@@ -480,7 +494,7 @@ func (a *Actor) ReadHoldingRegisters(address, quantity uint16) ([]byte, error) {
 
 func (a *Actor) ReadInputRegisters(address, quantity uint16) ([]byte, error) {
 	return sup.Call[readInputRegisters, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readInputRegisters{
 			address:  address,
 			quantity: quantity,
@@ -490,7 +504,7 @@ func (a *Actor) ReadInputRegisters(address, quantity uint16) ([]byte, error) {
 
 func (a *Actor) WriteSingleRegister(address, value uint16) ([]byte, error) {
 	return sup.Call[writeSingleRegister, []byte](
-		a.Mailbox,
+		a.mailbox,
 		writeSingleRegister{
 			address: address,
 			value:   value,
@@ -500,7 +514,7 @@ func (a *Actor) WriteSingleRegister(address, value uint16) ([]byte, error) {
 
 func (a *Actor) WriteMultipleRegisters(address, quantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[writeMultipleRegisters, []byte](
-		a.Mailbox,
+		a.mailbox,
 		writeMultipleRegisters{
 			address:  address,
 			quantity: quantity,
@@ -511,7 +525,7 @@ func (a *Actor) WriteMultipleRegisters(address, quantity uint16, value []byte) (
 
 func (a *Actor) ReadWriteMultipleRegisters(readAddress, readQuantity, writeAddress, writeQuantity uint16, value []byte) ([]byte, error) {
 	return sup.Call[readWriteMultipleRegisters, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readWriteMultipleRegisters{
 			readAddress:   readAddress,
 			readQuantity:  readQuantity,
@@ -524,7 +538,7 @@ func (a *Actor) ReadWriteMultipleRegisters(readAddress, readQuantity, writeAddre
 
 func (a *Actor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte, error) {
 	return sup.Call[maskWriteRegister, []byte](
-		a.Mailbox,
+		a.mailbox,
 		maskWriteRegister{
 			address: address,
 			andMask: andMask,
@@ -535,7 +549,7 @@ func (a *Actor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte, erro
 
 func (a *Actor) ReadFIFOQueue(address uint16) ([]byte, error) {
 	return sup.Call[readFIFOQueue, []byte](
-		a.Mailbox,
+		a.mailbox,
 		readFIFOQueue{
 			address: address,
 		},

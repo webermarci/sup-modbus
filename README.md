@@ -17,7 +17,6 @@ This library solves that by treating the Modbus connection as an **Actor**. All 
 * **Actor-Based Concurrency**: Thread-safe access to hardware. Multiple goroutines can call the actor safely; the actor handles the queue.
 * **Supervised Lifecycle**: Designed to run under a `sup.Supervisor`. If the connection drops (EOF/Timeout), the actor returns a fatal error, allowing the supervisor to handle reconnection.
 * **Protocol Support**: Supports Modbus TCP, RTU (RS485/RS232), and ASCII.
-* **Rich Observability**: Built-in `Observer` interface to track function codes, slave IDs, data payloads, and timing/latency.
 * **Industrial Timing**: Support for RS485 RTS delays and custom inter-frame "quiet time" requirements.
 
 ## Quick start
