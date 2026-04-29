@@ -37,7 +37,7 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 	var lastFC byte
 	var lastAddr uint16
 
-	actor := NewActor(TCP, "localhost:502", 1,
+	actor := NewActor(t.Name(), TCP, "localhost:502", 1,
 		WithOnRequest(func(functionCode, slaveId byte, address, quantity uint16) {
 			requestCalled = true
 			lastFC = functionCode
@@ -110,7 +110,7 @@ func TestModbusActor_ErrorHandling(t *testing.T) {
 }
 
 func TestWithMailboxSize(t *testing.T) {
-	actor := NewActor(TCP, "127.0.0.1:502", 1, WithMailboxSize(50))
+	actor := NewActor(t.Name(), TCP, "127.0.0.1:502", 1, WithMailboxSize(50))
 	if actor.config.mailboxSize != 50 {
 		t.Errorf("Expected mailbox size 50, got %d", actor.config.mailboxSize)
 	}

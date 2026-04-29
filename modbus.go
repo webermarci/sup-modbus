@@ -166,8 +166,9 @@ type Actor struct {
 }
 
 // NewActor creates a new Actor with the specified protocol, address, slave ID, and optional configuration options.
-func NewActor(protocol ModbusProtocol, address string, slaveId byte, opts ...ActorOption) *Actor {
+func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte, opts ...ActorOption) *Actor {
 	a := &Actor{
+		BaseActor: sup.NewBaseActor(name),
 		config: &actorConfig{
 			mailboxSize:      10,
 			protocol:         protocol,

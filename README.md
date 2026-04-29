@@ -34,7 +34,7 @@ import (
 )
 
 func main() {
-	actor := modbus.NewActor(
+	actor := modbus.NewActor("actor",
 		modbus.TCP, 
 		"192.168.1.50:502", 
 		1, // Slave ID
@@ -44,7 +44,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
     
-	supervisor := sup.NewSupervisor(
+	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(actor),
 		sup.WithPolicy(sup.Transient),
 		sup.WithRestartDelay(time.Second),
@@ -71,7 +71,7 @@ Use `bus.Signal` to poll a register at a specific interval. The signal will noti
 
 ```go
 // Create a raw byte signal from the Modbus actor
-temperatureRaw := bus.NewSignal(func() ([]byte, error) {
+temperatureRaw := bus.NewSignal("signal", func() ([]byte, error) {
 	return actor.ReadHoldingRegisters(100, 1)
 }).WithInterval(1 * time.Second)
 
@@ -89,7 +89,7 @@ Use `bus.Trigger` to create a write-only command path for your hardware.
 
 ```go
 // Create a trigger for a fan relay
-fanSwitch := bus.NewTrigger(func(on bool) error {
+fanSwitch := bus.NewTrigger("trigger", func(on bool) error {
 	val := uint16(0x0000)
 	if on { 
 		val = 0xFF00 
@@ -127,7 +127,7 @@ go func() {
 The `modbus.Actor` implements the `sup.Actor` interface. It should be managed by a supervisor to handle connection drops or hardware timeouts.
 
 ```go
-supervisor := sup.NewSupervisor(
+supervisor := sup.NewSupervisor("root",
 	sup.WithActors(actor, tempSignal), // Signals are also actors!
 	sup.WithPolicy(sup.Transient),
 	sup.WithRestartDelay(time.Second),
