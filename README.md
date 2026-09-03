@@ -4,20 +4,21 @@
 [![Test](https://github.com/webermarci/sup-modbus/actions/workflows/test.yml/badge.svg)](https://github.com/webermarci/sup-modbus/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-`sup-modbus` is a high-reliability Modbus client implementation for Go, built on top of the [sup](https://github.com/webermarci/sup) actor library. It provides a thread-safe, supervised, and observable way to interact with Modbus devices over TCP, RTU, or ASCII.
+`sup-modbus` provides supervised, serialized access to Modbus TCP, RTU, and
+ASCII devices. It is built on the [`sup`](https://github.com/webermarci/sup)
+resource primitive.
 
-## Why this exists?
+Modbus connections are stateful and must not be used concurrently. An `Actor`
+owns one connection per supervised execution and runs calls one at a time.
+When a transport operation fails, the actor releases the connection and
+returns the error so its supervisor can reconnect it. Modbus protocol
+exceptions are returned to the caller without discarding a healthy connection.
 
-Modbus is a single-threaded protocol by nature. If two different parts of your application try to access the same Serial or TCP port simultaneously, you get collisions, corrupted data, or "resource busy" errors. 
+## Installation
 
-This library solves that by treating the Modbus connection as an **Actor**. All requests are queued in a mailbox and processed sequentially by the actor loop, ensuring hardware access is perfectly serialized.
-
-## Features
-
-* **Actor-Based Concurrency**: Thread-safe access to hardware. Multiple goroutines can call the actor safely; the actor handles the queue.
-* **Supervised Lifecycle**: Designed to run under a `sup.Supervisor`. If the connection drops (EOF/Timeout), the actor returns a fatal error, allowing the supervisor to handle reconnection.
-* **Protocol Support**: Supports Modbus TCP, RTU (RS485/RS232), and ASCII.
-* **Industrial Timing**: Support for RS485 RTS delays and custom inter-frame "quiet time" requirements.
+```sh
+go get github.com/webermarci/sup-modbus
+```
 
 ## Quick start
 
@@ -25,113 +26,100 @@ This library solves that by treating the Modbus connection as an **Actor**. All 
 package main
 
 import (
-    "context"
-    "fmt"
-    "time"
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-		"github.com/webermarci/sup"
-    "github.com/webermarci/sup-modbus"
+	"github.com/webermarci/sup"
+	"github.com/webermarci/sup-modbus"
 )
 
 func main() {
-	actor := modbus.NewActor("actor",
-		modbus.TCP, 
-		"192.168.1.50:502", 
-		1, // Slave ID
-		modbus.WithTimeout(2 * time.Second),
+	ctx, cancel := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-    
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActor(actor),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(time.Second),
-		sup.WithRestartLimit(5, 10 * time.Second),
-	)
-    
-	supervisor.Run(ctx)
 
-	res, err := client.ReadHoldingRegisters(100, 2)
+	device := modbus.NewActor(
+		"plc",
+		modbus.TCP,
+		"192.168.1.50:502",
+		1,
+		modbus.WithTimeout(2*time.Second),
+	)
+
+	supervisor := sup.NewSupervisor("root", sup.Transient).
+		AddActors(device).
+		SetRestartDelay(time.Second).
+		SetRestartLimit(5, 10*time.Second)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- supervisor.Run(ctx)
+	}()
+
+	requestCtx, cancelRequest := context.WithTimeout(ctx, 3*time.Second)
+	data, err := device.ReadHoldingRegisters(requestCtx, 100, 2)
+	cancelRequest()
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("Register data: %X\n", data)
 
-	fmt.Printf("Register Data: %X\n", res)
+	cancel()
+	if err := <-done; err != nil {
+		panic(err)
+	}
 }
 ```
 
-## Reactive Bus Integration
+Calls wait while the actor is acquiring or reacquiring its connection. Always
+give each call a context with an appropriate deadline. A canceled context also
+stops a call that is waiting behind another operation. The underlying
+`goburrow/modbus` I/O is bounded by `WithTimeout` once it has started.
 
-`sup-modbus` works seamlessly with the [sup/bus](https://github.com/webermarci/sup/tree/main/bus) package. This allows you to turn Modbus registers into high-level **Signals**, **Mirrors**, and **Triggers**.
+## Concurrent callers
 
-### Polling Registers (Signals)
-Use `bus.Signal` to poll a register at a specific interval. The signal will notify subscribers only when the value actually changes.
+All methods are safe to call concurrently. The actor serializes them against
+the same connection:
 
 ```go
-// Create a raw byte signal from the Modbus actor
-temperatureRaw := bus.NewSignal("signal", func() ([]byte, error) {
-	return actor.ReadHoldingRegisters(100, 1)
-}).WithInterval(1 * time.Second)
-
-// Use a Mirror to decode the bytes into a float64
-temperature := bus.NewMirror(func() float64 {
-	data := temperatureRaw.Read()
-	if len(data) < 2 { return 0 }
-	return float64(binary.BigEndian.Uint16(data)) / 10.0
-})
+coils, err := device.ReadCoils(ctx, 0, 16)
+registers, err := device.ReadHoldingRegisters(ctx, 100, 4)
+_, err = device.WriteSingleCoil(ctx, 5, 0xFF00)
 ```
 
-### Writing to Coils (Triggers)
+An accepted operation is never replayed after reconnection, which prevents a
+write from being applied twice when its outcome is uncertain.
 
-Use `bus.Trigger` to create a write-only command path for your hardware.
+Invalid quantities, coil values, and write payload sizes are rejected before
+the request reaches the connection. Use `errors.Is(err,
+modbus.ErrInvalidArgument)` to identify these caller errors.
 
-```go
-// Create a trigger for a fan relay
-fanSwitch := bus.NewTrigger("trigger", func(on bool) error {
-	val := uint16(0x0000)
-	if on { 
-		val = 0xFF00 
-	}
-	_, err := actor.WriteSingleCoil(5, val)
-	return err
-})
+## Serial configuration
 
-// Writing is now decoupled from Modbus specifics
-fanSwitch.Write(true)
-```
-
-### Automated Logic
-
-By combining these, you can create reactive control loops that are completely decoupled from the Modbus protocol logic.
+RTU and ASCII actors accept serial settings. RTU can additionally configure
+RS485 RTS timing and a quiet period between serialized requests:
 
 ```go
-// Simple logic using a Mirror
-isTooHot := bus.NewMirror(func() bool {
-	return temperature.Read() > 28.5
-})
-
-// Bridge the signal to the trigger
-go func() {
-	for range tempRaw.Subscribe(ctx) {
-		if isTooHot.Read() {
-			fanSwitch.Write(true)
-    }
-	}
-}()
-```
-
-## Using with a Supervisor
-
-The `modbus.Actor` implements the `sup.Actor` interface. It should be managed by a supervisor to handle connection drops or hardware timeouts.
-
-```go
-supervisor := sup.NewSupervisor("root",
-	sup.WithActors(actor, tempSignal), // Signals are also actors!
-	sup.WithPolicy(sup.Transient),
-	sup.WithRestartDelay(time.Second),
+device := modbus.NewActor(
+	"meter",
+	modbus.RTU,
+	"/dev/ttyUSB0",
+	1,
+	modbus.WithSerialConfig(19200, 8, 1, "E"),
+	modbus.WithRS485(2*time.Millisecond, 2*time.Millisecond),
+	modbus.WithQuietTime(5*time.Millisecond),
 )
-
-supervisor.Run(ctx)
 ```
+
+## Observability
+
+Use `WithOnStart`, `WithOnRequest`, and `WithOnResponse` for logging and
+metrics. Callbacks execute synchronously as part of the actor's serialized
+lifecycle and should return promptly.
